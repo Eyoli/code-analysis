@@ -1,3 +1,3 @@
 
-rootProject.name = "consoleTest"
+rootProject.name = "untitled"
 
