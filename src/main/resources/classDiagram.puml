@@ -1,0 +1,146 @@
+@startuml
+
+title Classes - Class Diagram
+
+skinparam stereotypeCBackgroundColor<<Immutable>> DimGray
+skinparam class {
+    BackgroundColor<<Immutable>> Wheat
+    BorderColor<<Immutable>> Tomato
+}
+
+package "generation" #DDDDDD {
+    interface Generator<Type> {
+        +Type eval(Type parentValue1, Type parentValue2)
+    }
+
+    class OrganismGenerator implements Generator {
+        -Generator<doub>le> lifeSpanGenerator
+        -Generator<double> visionFieldGenerator
+        -Generator<double> maturityGenerator
+        -Generator<double> aggressivityGenerator
+        -Generator<String> genderGenerator
+        -Generator<String> dietGenerator
+        +Organism eval(Organism parent1, Organism parent2)
+    }
+
+    class NormalParameterGenerator implements Generator {
+        +double mean
+        +double stdDeviation
+        +NormalParameter(double mean, double stdDeviation)
+        +double eval(double parentValue1, double parentValue2)
+        +NormalParameter add(NormalParameter other)
+        +NormalParameter divide(double number)
+        +{static} NormalParameter mean(NormalParameter[] nps...)
+    }
+
+    OrganismGenerator *-- Generator
+
+    OrganismGenerator <<Immutable>>
+    NormalParameterGenerator <<Immutable>>
+}
+
+package "placement" #DDDDDD {
+
+    interface SpatialHolder<Object> {
+        +{abstract} add(Object o)
+        +{abstract} remove(Object o)
+        +{abstract} Object[] groups()
+        +{abstract} update()
+    }
+
+    interface Collider<Object> {
+        +{abstract} run(Object[] objects)
+    }
+    
+    abstract class PairCollider<Object> implements Collider {
+        +run(Object[] objects)
+        +{abstract} boolean areColliding(Object o1, Object o2)
+        +{abstract} onCollision(Object o1, Object o2)
+    }
+    
+    class OrganismCollider extends PairCollider {
+        +VisionCollider visionCollider
+        +InteractionCollider interactionCollider
+        +boolean areColliding(Organism i1, Organism i2)
+        +onCollision(Organism i1, Organism i2)
+    }
+
+    class VisionCollider extends PairCollider {
+        +boolean areColliding(Organism i1, Organism i2)
+        +onCollision(Organism i1, Organism i2)
+    }
+
+    class InteractionCollider extends PairCollider {
+        +boolean areColliding(Organism i1, Organism i2)
+        +onCollision(Organism i1, Organism i2)
+    }
+
+    OrganismCollider *-- VisionCollider
+    OrganismCollider *-- InteractionCollider
+}
+
+package "model" #DDDDDD {
+
+    abstract class Organism {
+        -InnateState state
+        -Position position
+        -Species species
+        +Organism(InnateState state, Species species, Position position)
+        +{abstract} uponSeeing(Organism Organism)
+        +{abstract} uponInteractingWith(Organism Organism)
+    }
+
+    class HomeBasedOrganism extends Organism {
+        -Position home
+        +HomeBasedOrganism(InnateState state, Position position)
+        +setHome(Position home)
+        +boolean hasHome()
+        +act(World world)
+    }
+
+    entity InnateState {
+        +String species
+        +double lifeSpan
+        +double visionField
+        +double maturity
+        +double aggressivity
+        +String gender
+        +String diet
+    }
+
+    class World {
+        -SpatialHolder<Organism> OrganismHolder
+        -Collider<Organism> collider
+        +add(Organism Organism)
+        +remove(Organism Organism)
+    }
+
+    entity Species {
+        +String name
+        -Generator<Organism> generator
+        +Species(String name, Generator<Organism> generator)
+        +boolean canBreedWith(Species other)
+        +Organism breed(Organism parent1, Organism parent2)
+    }
+
+    interface Position {
+    }
+
+    entity Position2D implements Position {
+        +int x
+        +int y
+    }
+
+    World *-- SpatialHolder
+    World *-- Collider
+    Organism *-- InnateState
+    Organism *-- Position
+    Organism *-- Species
+    Species *-- Generator
+
+    InnateState <<Immutable>>
+    Species <<Immutable>>
+    Position2D <<Immutable>>
+}
+
+@enduml
