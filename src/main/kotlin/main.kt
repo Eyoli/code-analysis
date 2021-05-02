@@ -1,137 +1,78 @@
-import kotlinx.coroutines.*
-import org.jetbrains.kotlin.cli.jvm.compiler.EnvironmentConfigFiles
-import org.jetbrains.kotlin.cli.jvm.compiler.KotlinCoreEnvironment
-import org.jetbrains.kotlin.com.intellij.openapi.util.Disposer
-import org.jetbrains.kotlin.com.intellij.psi.PsiManager
-import org.jetbrains.kotlin.com.intellij.testFramework.LightVirtualFile
-import org.jetbrains.kotlin.config.CompilerConfiguration
-import org.jetbrains.kotlin.idea.KotlinFileType
-import org.jetbrains.kotlin.psi.KtClass
-import org.jetbrains.kotlin.psi.KtFile
-import org.jetbrains.kotlin.psi.KtParameterList
-import org.jetbrains.kotlin.psi.KtUserType
-import org.jetbrains.kotlin.psi.psiUtil.getChildOfType
-import org.jetbrains.kotlin.psi.psiUtil.getChildrenOfType
-import org.jetbrains.kotlin.psi.psiUtil.getSuperNames
+import extraction.JavaProcessor
+import extraction.initFromExistingSources
+import graph.Graph
+import kotlinx.coroutines.runBlocking
+import java.io.BufferedWriter
 import java.io.File
-import java.util.*
-
-private val kotlinProject by lazy {
-    KotlinCoreEnvironment.createForProduction(
-        Disposer.newDisposable(),
-        CompilerConfiguration(),
-        EnvironmentConfigFiles.NATIVE_CONFIG_FILES //Can be JS/NATIVE_CONFIG_FILES for non JVM projects
-    ).project
-}
-
-private val javascriptProject by lazy {
-    KotlinCoreEnvironment.createForProduction(
-        Disposer.newDisposable(),
-        CompilerConfiguration(),
-        EnvironmentConfigFiles.JS_CONFIG_FILES //Can be JS/NATIVE_CONFIG_FILES for non JVM projects
-    ).project
-}
-
-fun createKtFile(codeString: String, fileName: String) =
-    PsiManager.getInstance(kotlinProject)
-        .findFile(
-            LightVirtualFile(fileName, KotlinFileType.INSTANCE, codeString)
-        ) as KtFile
-
-data class Edge(val start: String?, val end: String?, val type: String)
-
-class Graph() {
-    val edges = mutableListOf<Edge>()
-    fun add(edge: Edge) {
-        edges.add(edge)
-    }
-}
 
 fun main(args: Array<String>) = runBlocking {
-    val rootKt = "F:\\Data\\IdeaProjects\\consoleTest\\src\\main\\kotlin\\domain"
-    val rootJs = "F:\\Data\\Documents\\GitHub\\tactical\\build"
+    val root = "C:\\Users\\clement_obert\\IdeaProjects\\vsa-exchange"
 
     try {
-        graphCreator() {
-            extractEdgesFromFilesRecursively(rootKt) {
-                extractEdgesFromKtFile()
-            }
-//            extractEdgesFromFilesRecursively(rootJs) {
-//                extractEdgesFromJsFile()
-//            }
-        }.toCsv()
+        val graph = Graph<String>()
+        with(graph) {
+            initFromExistingSources(
+                root, setOf(
+                    JavaProcessor(true)
+                )
+            )
+            removeMatchingVertexes(".*(Cucumber|ApiCaller|Test|Stub|Fake).*".toRegex())
+            tagVertexes("groups")
+            findMostProbableGroup("group", "groups")
+            edgesToCsv(File("edges.csv").bufferedWriter())
+            vertexesToCsv(File("vertexes.csv").bufferedWriter())
+        }
     } catch (e: Exception) {
         println(e.printStackTrace())
     }
 }
 
-suspend fun graphCreator(process: suspend Graph.() -> Unit): Graph {
-    val graph = Graph()
-    graph.process()
-    return graph
+fun Graph<String>.removeMatchingVertexes(regex: Regex) {
+    removeIf { value -> value.contains(regex) }
 }
 
-suspend fun Graph.extractEdgesFromFilesRecursively(root: String, extractEdges: File.() -> List<Edge>) {
-    val jobs = ArrayDeque<Deferred<List<Edge>>>()
-
-    val filesDeque = ArrayDeque<File>()
-    filesDeque.addAll(File(root).listFiles())
-    while (!filesDeque.isEmpty()) {
-        val file = filesDeque.poll()
-        if (file.isDirectory) {
-            filesDeque.addAll(file.listFiles())
-        } else {
-            coroutineScope {
-                jobs.add(async { file.extractEdges() })
-            }
-        }
-    }
-
-    // On attend que tous les fichiers soient traités
-    while (!jobs.isEmpty()) {
-        jobs.poll().await().forEach(this::add)
+fun Graph<String>.tagVertexes(targetKey: String) {
+    val wordRegex = "[A-Z][a-z0-9]+".toRegex()
+    vertexes.iterable().forEach { vertex ->
+        vertex.tags[targetKey] = wordRegex.findAll(vertex.value).map { it.value }.toSet()
     }
 }
 
-fun File.extractEdgesFromJsFile(): List<Edge> {
-    val jsFile = PsiManager.getInstance(javascriptProject)
-        .findFile(
-            LightVirtualFile("name", KotlinFileType.INSTANCE, bufferedReader().readText())
-        )
-
-    return listOf()
+fun <T> Graph<T>.edgesToCsv(writer: BufferedWriter) {
+    writer.use { out ->
+        out.write("Source;Target;Tags")
+        out.newLine()
+        edges.iterable().forEach { edge ->
+            out.write("${edge.start};${edge.end};")
+            out.write(edge.tags.iterable<String>("tag").joinToString(","))
+            out.newLine()
+        }
+    }
 }
 
-fun File.extractEdgesFromKtFile(): List<Edge> {
-    val ktFile = createKtFile(bufferedReader().readText(), "xxx")
+fun <T> Graph<T>.findMostProbableGroup(targetKey: String, groupsKey: String) {
+    val stats = vertexes.iterable()
+        .flatMap { vertex -> vertex.tags.iterable<String>(groupsKey) }
+        .groupingBy { tag -> tag }
+        .eachCount()
 
-    return ktFile.getChildrenOfType<KtClass>()
-        .flatMap { ktClass ->
-            val edges = mutableListOf<Edge>()
-
-            ktClass.getSuperNames().forEach { superName ->
-                edges.add(Edge(ktClass.name, superName, "super"))
+    vertexes.iterable()
+        .forEach { vertex ->
+            val group = vertex.tags.iterable<String>(groupsKey).maxByOrNull { tag -> stats[tag] ?: 0 }
+            if (group != null) {
+                vertex.tags[targetKey] = group
             }
-            ktClass.primaryConstructor
-                ?.getChildOfType<KtParameterList>()?.parameters
-                ?.filter { ktParameter -> ktParameter.name != null }
-                ?.forEach { ktParameter ->
-                    edges.add(
-                        Edge(
-                            ktClass.name,
-                            (ktParameter.typeReference?.typeElement as KtUserType).referencedName,
-                            "parameter"
-                        )
-                    )
-                }
-
-            edges
         }
 }
 
-fun Graph.toCsv() {
-    println("Source;Target;EdgeType")
-    edges.forEach {
-        println("${it.start};${it.end};${it.type}")
+fun <T> Graph<T>.vertexesToCsv(writer: BufferedWriter) {
+    writer.use { out ->
+        out.write("Id;Label;Group")
+        out.newLine()
+        vertexes.iterable().forEach { vertex ->
+            out.write("${vertex.value};${vertex.value};")
+            out.write(vertex.tags.get<String>("group") ?: "")
+            out.newLine()
+        }
     }
 }
