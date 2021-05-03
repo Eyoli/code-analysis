@@ -15,6 +15,23 @@ abstract class LanguageProcessor(
     abstract fun processFile(file: File): List<Edge<String>>
 }
 
+suspend fun Graph<String>.initFromGit(rawUrl: String, processors: Set<JavaProcessor>) = coroutineScope {
+    val gitClone = async {
+        File("checkout").deleteRecursively()
+        val exec = Runtime.getRuntime().exec("git clone $rawUrl checkout")
+        exec.waitFor()
+        exec
+    }
+
+    val process = gitClone.await()
+    if (process.exitValue() == 0) {
+        println("Project is checked out")
+        initFromExistingSources("checkout", processors)
+    } else {
+        println(String(process.errorStream.readAllBytes()))
+    }
+}
+
 suspend fun Graph<String>.initFromExistingSources(
     root: String,
     processors: Set<LanguageProcessor>
@@ -24,14 +41,16 @@ suspend fun Graph<String>.initFromExistingSources(
 
     val filesDeque = ArrayDeque<File>()
     filesDeque.add(File(root))
-    while (!filesDeque.isEmpty()) {
-        val file = filesDeque.removeFirst()
-        if (file.isDirectory) {
-            filesDeque.addAll(file.listFiles())
-        } else {
-            val firstProcessor = processors.firstOrNull { processor -> file.extension in processor.extensions }
-            if (firstProcessor != null) {
-                coroutineScope {
+
+    coroutineScope {
+        while (!filesDeque.isEmpty()) {
+            val file = filesDeque.removeFirst()
+            if (file.isDirectory) {
+                filesDeque.addAll(file.listFiles())
+            } else {
+                val firstProcessor = processors.firstOrNull { processor -> file.extension in processor.extensions }
+                if (firstProcessor != null) {
+
                     jobs.add(async {
                         val edges = firstProcessor.processFile(file)
                         if (firstProcessor.filterBasicTypes) {

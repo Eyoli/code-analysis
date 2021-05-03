@@ -1,5 +1,6 @@
 import extraction.JavaProcessor
 import extraction.initFromExistingSources
+import extraction.initFromGit
 import graph.Graph
 import kotlinx.coroutines.runBlocking
 import java.io.BufferedWriter
@@ -11,11 +12,14 @@ fun main(args: Array<String>) = runBlocking {
     try {
         val graph = Graph<String>()
         with(graph) {
-            initFromExistingSources(
-                root, setOf(
-                    JavaProcessor(true)
-                )
-            )
+//            initFromExistingSources(
+//                root, setOf(
+//                    JavaProcessor(true)
+//                )
+//            )
+            initFromGit("https://github.com/Eyoli/tactical.git", setOf(
+                JavaProcessor(true)
+            ))
             removeMatchingVertexes(".*(Cucumber|ApiCaller|Test|Stub|Fake).*".toRegex())
             tagVertexes("groups")
             findMostProbableGroup("group", "groups")
