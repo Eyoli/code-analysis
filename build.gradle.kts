@@ -16,6 +16,7 @@ dependencies {
     testImplementation(kotlin("test-junit"))
     implementation("org.jetbrains.kotlin:kotlin-compiler-embeddable:1.3.21")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.4.2")
+    implementation("org.jgrapht:jgrapht-core:1.5.1")
 }
 
 tasks.test {

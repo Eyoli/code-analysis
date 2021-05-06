@@ -1,6 +1,6 @@
 package extraction
 
-import graph.Edge
+import graph.GraphInterface
 import org.jetbrains.kotlin.cli.jvm.compiler.EnvironmentConfigFiles
 import org.jetbrains.kotlin.cli.jvm.compiler.KotlinCoreEnvironment
 import org.jetbrains.kotlin.com.intellij.openapi.util.Disposer
@@ -29,46 +29,30 @@ private val KOTLIN_BASIC_TYPES = setOf("List")
 
 private const val TYPE_TAG = "type"
 
-class KotlinProcessor(filterBasicTypes: Boolean) : LanguageProcessor(setOf("kt", "kts"), KOTLIN_BASIC_TYPES, filterBasicTypes) {
+class KotlinProcessor(filterBasicTypes: Boolean) :
+    LanguageProcessor(setOf("kt", "kts"), KOTLIN_BASIC_TYPES, filterBasicTypes) {
 
-    override fun processFile(file: File): List<Edge<String>> {
-        try {
-            val fileContent = PsiManager.getInstance(project)
-                .findFile(
-                    LightVirtualFile(file.name, KotlinFileType.INSTANCE, file.bufferedReader().readText())
-                ) as KtFile
+    override suspend fun processFile(file: File, graph: GraphInterface<String>) {
+        val fileContent = PsiManager.getInstance(project)
+            .findFile(
+                LightVirtualFile(file.name, KotlinFileType.INSTANCE, file.bufferedReader().readText())
+            ) as KtFile
 
-            return fileContent.getChildrenOfType<KtClass>()
-                .flatMap { ktClass ->
-                    val edges = mutableListOf<Edge<String>>()
+        return fileContent.getChildrenOfType<KtClass>()
+            .forEach { ktClass ->
+                val start = ktClass.name!!
 
-                    ktClass.getSuperNames().forEach { superName ->
-                        with(Edge(ktClass.name!!, superName)) {
-                            tags[TYPE_TAG] = "extends"
-                            edges.add(this)
-                        }
-                    }
-                    ktClass.primaryConstructor
-                        ?.getChildOfType<KtParameterList>()?.parameters
-                        ?.filter { ktParameter -> ktParameter.name != null && ktParameter.typeReference?.typeElement != null }
-                        ?.forEach { ktParameter ->
-                            with(
-                                Edge(
-                                    ktClass.name!!,
-                                    (ktParameter.typeReference?.typeElement as KtUserType).referencedName!!
-                                )
-                            ) {
-                                tags[TYPE_TAG] = "extends"
-                                edges.add(this)
-                            }
-                        }
-
-                    edges
+                ktClass.getSuperNames().forEach { superName ->
+                    graph.addEdgeIfValid(start, superName, mapOf(Pair(TYPE_TAG, "extends")))
                 }
-        } catch (e: Exception) {
-            println("Error parsing file ${file.name}")
-            return listOf()
-        }
+                ktClass.primaryConstructor
+                    ?.getChildOfType<KtParameterList>()?.parameters
+                    ?.filter { ktParameter -> ktParameter.name != null && ktParameter.typeReference?.typeElement != null }
+                    ?.forEach { ktParameter ->
+                        val end = (ktParameter.typeReference?.typeElement as KtUserType).referencedName!!
+                        graph.addEdgeIfValid(start, end, mapOf(Pair(TYPE_TAG, "extends")))
+                    }
+            }
     }
 
 }

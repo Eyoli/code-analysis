@@ -1,6 +1,6 @@
 package extraction
 
-import graph.Edge
+import graph.GraphInterface
 import org.jetbrains.kotlin.cli.jvm.compiler.EnvironmentConfigFiles
 import org.jetbrains.kotlin.cli.jvm.compiler.KotlinCoreEnvironment
 import org.jetbrains.kotlin.com.intellij.ide.highlighter.JavaFileType
@@ -32,56 +32,38 @@ private const val TYPE_TAG = "type"
 
 class JavaProcessor(filterBasicTypes: Boolean) : LanguageProcessor(setOf("java"), JAVA_BASIC_TYPES, filterBasicTypes) {
 
-    override fun processFile(file: File): List<Edge<String>> {
-        try {
-            val fileContent = PsiManager.getInstance(JAVA_PROJECT)
-                .findFile(
-                    LightVirtualFile(file.name, JavaFileType.INSTANCE, file.bufferedReader().readText())
-                ) as PsiJavaFileImpl
+    override suspend fun processFile(file: File, graph: GraphInterface<String>) {
+        val fileContent = PsiManager.getInstance(JAVA_PROJECT)
+            .findFile(
+                LightVirtualFile(file.name, JavaFileType.INSTANCE, file.bufferedReader().readText())
+            ) as PsiJavaFileImpl
 
-            return fileContent.classes
-                .filter { psiClass -> !psiClass.isEnum }
-                .flatMap { javaClass ->
-                    val edges = mutableListOf<Edge<String>>()
-                    val start = javaClass.name!!
+        fileContent.classes
+            .filter { psiClass -> !psiClass.isEnum }
+            .forEach { javaClass ->
+                val start = javaClass.name!!
 
-                    javaClass.extendsListTypes.forEach { superClass ->
-                        with(Edge(start, superClass.className)) {
-                            tags[TYPE_TAG] = "extends"
-                            edges.add(this)
-                        }
-                    }
-                    javaClass.implementsListTypes.forEach { superClass ->
-                        with(Edge(start, superClass.className)) {
-                            tags[TYPE_TAG] = "implements"
-                            edges.add(this)
-                        }
-                    }
-
-                    val parametersToProcess = ArrayDeque<PsiType>()
-                    javaClass.fields.forEach { field -> parametersToProcess.add(field.type) }
-                    while (!parametersToProcess.isEmpty()) {
-                        val type = parametersToProcess.removeFirst()
-                        if (type is PsiClassReferenceType) {
-                            type.parameters.forEach(parametersToProcess::add)
-                            with(Edge(start, type.name)) {
-                                tags[TYPE_TAG] = "field"
-                                edges.add(this)
-                            }
-
-                        } else {
-                            with(Edge(start, type.presentableText)) {
-                                tags[TYPE_TAG] = "field"
-                                edges.add(this)
-                            }
-                        }
-                    }
-
-                    edges
+                javaClass.extendsListTypes.forEach { superClass ->
+                    graph.addEdgeIfValid(start, superClass.className, mapOf(Pair(TYPE_TAG, "extends")))
                 }
-        } catch (e: Exception) {
-            println("Error parsing file ${file.name}")
-            return listOf()
-        }
+                javaClass.implementsListTypes.forEach { superClass ->
+                    graph.addEdgeIfValid(start, superClass.className, mapOf(Pair(TYPE_TAG, "implements")))
+                }
+
+                val parametersToProcess = ArrayDeque<PsiType>()
+                javaClass.fields.forEach { field -> parametersToProcess.add(field.type) }
+                while (!parametersToProcess.isEmpty()) {
+                    val type = parametersToProcess.removeFirst()
+                    if (type is PsiClassReferenceType) {
+                        type.parameters.forEach(parametersToProcess::add)
+                        graph.addEdgeIfValid(start, type.name, mapOf(Pair(TYPE_TAG, "field")))
+
+                    } else {
+                        graph.addEdgeIfValid(start, type.presentableText, mapOf(Pair(TYPE_TAG, "field")))
+                    }
+                }
+            }
     }
+
+
 }

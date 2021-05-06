@@ -1,21 +1,33 @@
 package extraction
 
-import graph.Edge
-import graph.Graph
-import kotlinx.coroutines.Deferred
+import Logger
+import graph.GraphInterface
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.io.File
 
 abstract class LanguageProcessor(
     val extensions: Set<String>,
-    val basicTypes: Set<String>,
-    val filterBasicTypes: Boolean
+    private val basicTypes: Set<String>,
+    private val filterBasicTypes: Boolean,
+    private val mutex: Mutex = Mutex()
 ) {
-    abstract fun processFile(file: File): List<Edge<String>>
+    abstract suspend fun processFile(file: File, graph: GraphInterface<String>)
+
+    protected suspend fun GraphInterface<String>.addEdgeIfValid(start: String, end: String, tags: Map<String, String>) {
+        if (!filterBasicTypes || (start !in basicTypes && end !in basicTypes)) {
+            mutex.withLock {
+                addEdge(start, end, tags)
+            }
+        }
+    }
 }
 
-suspend fun Graph<String>.initFromGit(rawUrl: String, processors: Set<JavaProcessor>) = coroutineScope {
+suspend fun GraphInterface<String>.getGraphFromGitProject(rawUrl: String, processors: Set<JavaProcessor>) = coroutineScope {
     val gitClone = async {
         File("checkout").deleteRecursively()
         val exec = Runtime.getRuntime().exec("git clone $rawUrl checkout")
@@ -25,19 +37,16 @@ suspend fun Graph<String>.initFromGit(rawUrl: String, processors: Set<JavaProces
 
     val process = gitClone.await()
     if (process.exitValue() == 0) {
-        println("Project is checked out")
-        initFromExistingSources("checkout", processors)
+        Logger.log("Project is checked out")
+        fillGraphFromExistingSources("checkout", processors)
     } else {
-        println(String(process.errorStream.readAllBytes()))
+        Logger.log(String(process.errorStream.readAllBytes()))
     }
 }
 
-suspend fun Graph<String>.initFromExistingSources(
-    root: String,
-    processors: Set<LanguageProcessor>
-) {
+suspend fun GraphInterface<String>.fillGraphFromExistingSources(root: String, processors: Set<LanguageProcessor>) {
 
-    val jobs = ArrayDeque<Deferred<List<Edge<String>>>>()
+    val jobs = ArrayDeque<Job>()
 
     val filesDeque = ArrayDeque<File>()
     filesDeque.add(File(root))
@@ -50,15 +59,14 @@ suspend fun Graph<String>.initFromExistingSources(
             } else {
                 val firstProcessor = processors.firstOrNull { processor -> file.extension in processor.extensions }
                 if (firstProcessor != null) {
+                    Logger.log("Add task for ${file.name}")
+                    jobs.add(launch {
+                        Logger.log("Processing ${file.name}")
 
-                    jobs.add(async {
-                        val edges = firstProcessor.processFile(file)
-                        if (firstProcessor.filterBasicTypes) {
-                            edges.filter { edge ->
-                                edge.start !in firstProcessor.basicTypes && edge.end !in firstProcessor.basicTypes
-                            }
-                        } else {
-                            edges
+                        try {
+                            firstProcessor.processFile(file, this@fillGraphFromExistingSources)
+                        } catch (e: Exception) {
+                            Logger.log("Error parsing file ${file.name}")
                         }
                     })
                 }
@@ -68,6 +76,6 @@ suspend fun Graph<String>.initFromExistingSources(
 
     // On attend que tous les fichiers soient traités
     while (!jobs.isEmpty()) {
-        jobs.removeFirst().await().forEach(this::add)
+        jobs.removeFirst().join()
     }
 }
