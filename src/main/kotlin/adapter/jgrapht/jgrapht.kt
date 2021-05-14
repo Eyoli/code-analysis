@@ -10,14 +10,14 @@ class JGraphTObject<T> : GraphInterface<T> {
     private val jGraphTObject: org.jgrapht.Graph<T, DefaultEdge> = SimpleGraph(DefaultEdge::class.java)
     private val vertexesTags: MutableMap<T, MutableMap<String, String>> = mutableMapOf()
 
-    fun useLabelPropagationClustering(targetKey: String) {
-        val alg = LabelPropagationClustering(jGraphTObject, 100)
+    fun useLabelPropagationClustering(tagKey: String) {
+        val alg = LabelPropagationClustering(jGraphTObject)
         val clustering = alg.clustering
         var i = 1
         clustering.clusters.forEach { cluster ->
             val clusterName = "Cluster$i"
             cluster.forEach { v ->
-                vertexesTags[v]?.set(targetKey, clusterName)
+                vertexesTags[v]?.set(tagKey, clusterName)
             }
             i++
         }
@@ -52,4 +52,8 @@ class JGraphTObject<T> : GraphInterface<T> {
 
     override fun vertexes(): Map<T, Map<String, String>> =
         jGraphTObject.vertexSet().associateWith { vertexesTags.getOrDefault(it, mapOf()) }
+
+    override fun vertexesTagValues(key: String) = vertexesTags
+        .filterValues { it.containsKey(key) }
+        .mapValues { it.value.getValue(key) }
 }

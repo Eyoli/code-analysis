@@ -16,7 +16,7 @@ fun main(args: Array<String>) = runBlocking {
 
     val configs = listOf(
         ExtractionConfig("vsa-exchange", "C:\\Users\\clement_obert\\IdeaProjects\\vsa-exchange"),
-        ExtractionConfig("vsa-ticketing", "C:\\Users\\clement_obert\\IdeaProjects\\vsa-ticketing")
+        //ExtractionConfig("vsa-ticketing", "C:\\Users\\clement_obert\\IdeaProjects\\vsa-ticketing")
     )
 
     val outputFolder = Files.createDirectories(Path.of("output"))
@@ -35,10 +35,22 @@ fun main(args: Array<String>) = runBlocking {
 //                JavaProcessor(true)
 //            ))
                 removeMatchingVertexes(".*(Cucumber|ApiCaller|Test|Stub|Fake).*".toRegex())
-                tagVertexes("groups")
-                findClusterBasedOnTags("group", "groups")
 
+                tagVertexes("groups")
+                findGroupBasedOnTags(
+                    sourceTagKey = "groups",
+                    sourceTagDelimiter = ",",
+                    meaningfulGroupSize = 5,
+                    targetTagKey = "group"
+                )
                 useLabelPropagationClustering("cluster")
+                findGroupBasedOnTags(
+                    sourceTagKey = "groups",
+                    sourceTagDelimiter = ",",
+                    meaningfulGroupSize = 5,
+                    targetTagKey = "groupWithClustering",
+                    clusterKey = "cluster"
+                )
 
                 vertexesToCsv(File(projectFolder.resolve("vertexes.csv").toUri()).bufferedWriter())
                 edgesToCsv(File(projectFolder.resolve("edges.csv").toUri()).bufferedWriter())
@@ -61,32 +73,60 @@ fun GraphInterface<String>.tagVertexes(targetKey: String) {
     }
 }
 
-fun <T> Map<T, Map<String, String>>.countValuesOccurences(key: String) = run {
-    values.mapNotNull { tags -> tags[key] }
-        .flatMap { it.split(",") }
+fun <T> GraphInterface<T>.findGroupBasedOnTags(
+    sourceTagKey: String,
+    sourceTagDelimiter: String,
+    targetTagKey: String,
+    meaningfulGroupSize: Int = 1,
+    meaningfulGroupPercentage: Double = 0.0,
+    clusterKey: String? = null
+) {
+    val tagOccurencies = vertexes().values
+        .mapNotNull { tags -> tags[sourceTagKey]?.split(sourceTagDelimiter) }
+        .flatten()
         .groupingBy { tag -> tag }
         .eachCount()
-}
+        .filter { it.value >= meaningfulGroupSize }
+        .filter { it.value / vertexes().values.size.toDouble() >= meaningfulGroupPercentage }
 
-fun <T> GraphInterface<T>.findClusterBasedOnTags(targetKey: String, groupsKey: String) {
-    val stats = vertexes().countValuesOccurences(groupsKey)
+    val defaultCluster = "DEFAULT_CLUSTER"
+    val tagOccurenciesPerCluster = vertexes().values
+        .map { it[clusterKey] ?: defaultCluster }
+        .distinct()
+        .associateWith { cluster ->
+            vertexes().values
+                .filter { tags -> (tags[clusterKey] ?: defaultCluster) == cluster }
+                .mapNotNull { tags -> tags[sourceTagKey]?.split(sourceTagDelimiter) }
+                .flatten()
+                .groupingBy { tag -> tag }
+                .eachCount()
+        }
 
     forEachVertex { value: T, tags: MutableMap<String, String> ->
-        val group = tags[groupsKey]?.split(",")?.maxByOrNull { tag -> stats[tag] ?: 0 }
-        if (group != null) {
-            tags[targetKey] = group
+        val tagOccurenciesForCurrentCluster = tagOccurenciesPerCluster.getValue(tags[clusterKey] ?: defaultCluster)
+        val group = tags[sourceTagKey]?.split(sourceTagDelimiter)
+            ?.filter { tag -> tagOccurenciesForCurrentCluster[tag] != null }
+            ?.maxByOrNull { tag -> tagOccurenciesForCurrentCluster.getValue(tag) }
+        if (group != null && tagOccurencies.get<Any, Int>(group) != null) {
+            tags[targetTagKey] = group
         }
     }
 }
 
 fun <T> GraphInterface<T>.vertexesToCsv(writer: BufferedWriter) {
     writer.use { out ->
-        out.write("Id;Label;Group;Cluster")
+        out.write("Id;Label;Cluster;Group;GroupWithClustering;Strange")
         out.newLine()
         forEachVertex { value: T, tags: MutableMap<String, String> ->
-            out.write("$value;$value;")
-            out.write("${tags["group"] ?: ""};")
-            out.write(tags["cluster"] ?: "")
+            val row = listOf(
+                "$value",
+                "$value",
+                tags["cluster"] ?: "",
+                tags["group"] ?: "",
+                tags["groupWithClustering"] ?: tags["group"] ?: "",
+                tags["group"] != tags["groupWithClustering"] && tags["groupWithClustering"] != null
+            )
+            out.write(row.joinToString(separator = ";"))
             out.newLine()
         }
     }

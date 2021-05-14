@@ -6,4 +6,5 @@ interface GraphInterface<T> {
     fun forEachEdge(action: (source: T, target: T) -> Unit)
     fun removeVertexIf(filter: (T) -> Boolean)
     fun vertexes(): Map<T, Map<String, String>>
+    fun vertexesTagValues(key: String): Map<T, String>
 }
